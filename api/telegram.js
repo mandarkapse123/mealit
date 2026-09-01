@@ -67,11 +67,10 @@ async function downloadTelegramFile(fileId) {
   return Buffer.from(arrayBuffer).toString('base64');
 }
 
-// Fallback Natural Language Parser if GEMINI_API_KEY is not configured
+// Fallback Natural Language Parser
 function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAndMember) {
   const clean = promptText.toLowerCase();
 
-  // 1. Detect target date
   let targetDate = todayStr;
   let dateLabel = 'Today';
   if (clean.includes('tomorrow') || clean.includes('kal')) {
@@ -79,10 +78,8 @@ function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAnd
     dateLabel = 'Tomorrow';
   }
 
-  // 2. Detect target member
   const foundMember = members.find(m => clean.includes(m.name.split(' ')[0].toLowerCase()));
 
-  // 3. Detect target meal slot
   const slot = ['breakfast', 'lunch', 'dinner', 'snacks', 'nashta', 'jevan', 'khana'].find(s => {
     if (s === 'nashta') return clean.includes('breakfast') || clean.includes('nashta');
     if (s === 'jevan' || s === 'khana') return clean.includes('lunch') || clean.includes('dinner');
@@ -91,7 +88,6 @@ function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAnd
 
   const emojiMap = { breakfast: '🌅', lunch: '🍛', snacks: '🍪', dinner: '🌙' };
 
-  // Case A: Specific Member + Specific Slot (e.g., "what is Agastya having for dinner?")
   if (foundMember && slot && (slot === 'breakfast' || slot === 'lunch' || slot === 'dinner' || slot === 'snacks')) {
     const p = plansByDateAndMember.get(`${targetDate}_${foundMember.id}`);
     const mealText = p?.[slot]?.trim();
@@ -99,7 +95,6 @@ function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAnd
       `${emojiMap[slot] || '🍴'} ${mealText ? mealText : '<i>Not set yet in portal</i>'}`;
   }
 
-  // Case B: Specific Member Full Day (e.g., "what is Mandar's diet today?")
   if (foundMember) {
     const p = plansByDateAndMember.get(`${targetDate}_${foundMember.id}`);
     return `🍽️ <b>${dateLabel}'s Meal Plan for ${foundMember.name}</b>\n` +
@@ -111,7 +106,6 @@ function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAnd
       `🌙 <b>Dinner:</b> ${p?.dinner?.trim() || '<i>Not set</i>'}\n`;
   }
 
-  // Case C: Specific Slot for Everyone (e.g., "what's for lunch today?")
   if (slot && (slot === 'breakfast' || slot === 'lunch' || slot === 'dinner' || slot === 'snacks')) {
     let reply = `🍽️ <b>${emojiMap[slot] || '🍴'} ${dateLabel}'s ${slot.toUpperCase()} for Everyone:</b>\n` +
       `📅 <i>${getFriendlyDate(targetDate, TIMEZONE)}</i>\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -124,7 +118,6 @@ function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAnd
     return reply;
   }
 
-  // Case D: General / Full Day Family Summary
   let reply = `🍽️ <b>${dateLabel}'s Family Meal Plan</b>\n` +
     `📅 <i>${getFriendlyDate(targetDate, TIMEZONE)}</i>\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
@@ -180,7 +173,6 @@ export default async function handler(req, res) {
           members = membersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         }
 
-        // Fetch upcoming 7 days meal plans for context
         const weekDates = [0, 1, 2, 3, 4, 5, 6].map(i => getTodayString(TIMEZONE, i));
         const plansSnap = await db.collection('mealPlans')
           .where('date', '>=', weekDates[0])
@@ -196,15 +188,25 @@ export default async function handler(req, res) {
       }
     }
 
-    // --- 1. HANDLE VOICE MESSAGE VIA GEMINI (If voice note sent) ---
-    if (isVoice && GEMINI_API_KEY) {
+    // --- 1. HANDLE VOICE MESSAGE (Voice notes on Telegram) ---
+    if (isVoice) {
+      if (!GEMINI_API_KEY) {
+        const voiceMissingKeyNotice = `🎙️ <b>Voice Message Received!</b>\n\n` +
+          `To enable AI voice processing:\n` +
+          `1. Get a free API key at <b>aistudio.google.com</b>\n` +
+          `2. Add <code>GEMINI_API_KEY</code> to your Vercel Environment Variables\n` +
+          `3. Redeploy Vercel.\n\n` +
+          `<i>In the meantime, you can type your questions naturally!</i>`;
+        await sendTelegramReply(chatId, voiceMissingKeyNotice);
+        return res.status(200).json({ ok: true });
+      }
+
       const voiceFileId = (msg.voice || msg.audio).file_id;
       const base64Audio = await downloadTelegramFile(voiceFileId);
 
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-      // Build context of all family meals
       let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
       members.forEach(m => {
         mealsContext += `- ${m.name} (Age: ${m.age || 'N/A'}, Relation: ${m.relation || 'Family'}, Diet: ${m.diet || 'Veg'})\n`;
@@ -241,7 +243,7 @@ ${mealsContext}`;
       return res.status(200).json({ ok: true });
     }
 
-    // --- 2. HANDLE NATURAL LANGUAGE TEXT VIA GEMINI (If GEMINI_API_KEY configured) ---
+    // --- 2. HANDLE NATURAL LANGUAGE TEXT VIA GEMINI ---
     if (GEMINI_API_KEY && userText && !userText.startsWith('/start') && !userText.startsWith('/help')) {
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
@@ -279,18 +281,17 @@ ${mealsContext}`;
       return res.status(200).json({ ok: true });
     }
 
-    // --- 3. BUILT-IN SMART NLP PARSER (Works out of the box with zero setup) ---
+    // --- 3. BUILT-IN SMART NLP PARSER (Fallback) ---
     if (userText) {
       if (userText === '/start' || userText === '/help' || userText === 'help') {
         const helpMsg = `🍽️ <b>Welcome to MealBot!</b>\n\n` +
           `You can talk to me in <b>Natural Language or Voice</b> on your iPad:\n\n` +
           `🎙️ <b>Voice:</b> Hold the mic button and ask <i>"What's for lunch today?"</i>\n` +
-          `💬 <b>Natural Questions you can type:</b>\n` +
+          `💬 <b>Natural Questions:</b>\n` +
           `• <i>"What is Agastya eating for dinner?"</i>\n` +
           `• <i>"What's planned for lunch today?"</i>\n` +
           `• <i>"What is Mandar's diet tomorrow?"</i>\n` +
-          `• <i>"Is Vrushali eating veg tonight?"</i>\n` +
-          `• <i>"Aaj khane me kya hai?"</i>\n`;
+          `• <i>"Is Vrushali eating veg tonight?"</i>\n`;
         await sendTelegramReply(chatId, helpMsg);
         return res.status(200).json({ ok: true });
       }
