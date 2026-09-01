@@ -11,14 +11,14 @@ import {
 import { db } from './firebase';
 
 const MEMBERS_COLLECTION = 'members';
-const STORAGE_KEY = 'mealbot_members_v2';
+const STORAGE_KEY = 'mealbot_members_v3';
 
 export const defaultMembers = [
-  { id: 'member-mandar', name: 'Mandar', age: 31, relation: 'Self', diet: 'Non-Veg', telegramChatId: '', createdAt: new Date().toISOString() },
-  { id: 'member-madhura', name: 'Madhura', age: 33, relation: 'Spouse', diet: 'Non-Veg', telegramChatId: '', createdAt: new Date().toISOString() },
-  { id: 'member-pankaj', name: 'Pankaj', age: 33, relation: 'Brother', diet: 'Non-Veg', telegramChatId: '', createdAt: new Date().toISOString() },
-  { id: 'member-vrushali', name: 'Vrushali', age: 60, relation: 'Mother', diet: 'Veg', telegramChatId: '', createdAt: new Date().toISOString() },
-  { id: 'member-agastya', name: 'Agastya', age: 3, relation: 'Son', diet: 'Non-Veg', telegramChatId: '', createdAt: new Date().toISOString() }
+  { id: 'member-mandar', name: 'Mandar', age: 31, relation: 'Self', diet: 'Non-Veg', telegramChatId: '8804668358', createdAt: new Date().toISOString() },
+  { id: 'member-madhura', name: 'Madhura', age: 33, relation: 'Spouse', diet: 'Non-Veg', telegramChatId: '8804668358', createdAt: new Date().toISOString() },
+  { id: 'member-pankaj', name: 'Pankaj', age: 33, relation: 'Brother', diet: 'Non-Veg', telegramChatId: '8804668358', createdAt: new Date().toISOString() },
+  { id: 'member-vrushali', name: 'Vrushali', age: 60, relation: 'Mother', diet: 'Veg', telegramChatId: '8804668358', createdAt: new Date().toISOString() },
+  { id: 'member-agastya', name: 'Agastya', age: 3, relation: 'Son', diet: 'Non-Veg', telegramChatId: '8804668358', createdAt: new Date().toISOString() }
 ];
 
 const getLocalMembers = () => {
@@ -64,8 +64,8 @@ export const addMember = async (memberData) => {
     name: memberData.name.trim(),
     age: memberData.age ? Number(memberData.age) : '',
     relation: (memberData.relation || 'Family').trim(),
-    diet: memberData.diet || 'Veg', // 'Veg' | 'Non-Veg' | 'Eggetarian'
-    telegramChatId: (memberData.telegramChatId || '').trim(),
+    diet: memberData.diet || 'Veg',
+    telegramChatId: (memberData.telegramChatId || '8804668358').trim(),
     createdAt: new Date().toISOString()
   };
 
@@ -99,7 +99,7 @@ export const updateMember = async (id, memberData) => {
     age: memberData.age ? Number(memberData.age) : '',
     relation: (memberData.relation || 'Family').trim(),
     diet: memberData.diet || 'Veg',
-    telegramChatId: (memberData.telegramChatId || '').trim(),
+    telegramChatId: (memberData.telegramChatId || '8804668358').trim(),
     updatedAt: new Date().toISOString()
   };
 
