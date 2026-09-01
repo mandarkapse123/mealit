@@ -1,0 +1,11 @@
+node_modules
+.npm-cache
+dist
+.env
+.env.local
+*.local
+.DS_Store
+serviceAccountKey.json
+notifier/node_modules
+notifier/.npm-cache
+notifier/.env

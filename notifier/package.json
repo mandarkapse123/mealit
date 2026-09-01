@@ -1,0 +1,15 @@
+{
+  "name": "meal-planner-notifier",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Daily Telegram Notifier for Family Meal Plans",
+  "main": "notify.js",
+  "scripts": {
+    "notify": "node notify.js",
+    "get-chat-ids": "node get-chat-ids.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.1.0"
+  }
+}
