@@ -1,0 +1,64 @@
+name: Family Meal & Grocery Telegram Notifier
+
+on:
+  schedule:
+    # 1. Breakfast reminder (6:00 AM IST / 00:30 UTC - 2hr before 8AM breakfast)
+    - cron: '30 0 * * *'
+    # 2. Lunch reminder (11:00 AM IST / 05:30 UTC - 2hr before 1PM lunch)
+    - cron: '30 5 * * *'
+    # 3. Dinner reminder (6:00 PM IST / 12:30 UTC - 2hr before 8PM dinner)
+    - cron: '30 12 * * 1-6'
+    # 4. Sunday 6:00 PM Weekly Grocery & Coming Week Meals (12:30 UTC Sunday)
+    - cron: '30 12 * * 0'
+
+  workflow_dispatch:
+    inputs:
+      notify_mode:
+        description: 'Notification Type'
+        required: true
+        type: choice
+        options:
+          - auto
+          - breakfast
+          - lunch
+          - dinner
+          - snacks
+          - daily_summary
+          - weekly_grocery
+        default: auto
+      dry_run:
+        description: 'Dry run mode'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  notify:
+    name: Send Telegram Meal / Grocery Digest to iPad
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'notifier/package.json'
+
+      - name: Install Dependencies
+        working-directory: ./notifier
+        run: npm ci
+
+      - name: Run Notifier Script
+        working-directory: ./notifier
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TIMEZONE: 'Asia/Kolkata'
+          NOTIFY_MODE: ${{ github.event.inputs.notify_mode || 'auto' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: node notify.js
