@@ -1,26 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getMembers } from '../services/memberService';
-import { getMealPlan, saveMealPlan, getMealPlansForRange, duplicateMealPlan } from '../services/mealPlanService';
-import { DuplicateModal } from '../components/DuplicateModal';
+import { 
+  getMealPlan, 
+  saveMealPlan, 
+  getMealPlansForRange, 
+  duplicateMealPlan 
+} from '../services/mealPlanService';
 import { BulkUploadModal } from '../components/BulkUploadModal';
+import { DuplicateModal } from '../components/DuplicateModal';
 import { 
   Calendar as CalendarIcon, 
   ChevronLeft, 
   ChevronRight, 
-  Copy, 
   Save, 
+  Copy, 
+  Upload, 
+  Users, 
+  Check, 
   Sun, 
   Utensils, 
   Moon, 
-  Cookie, 
-  Users, 
-  Check, 
+  Cookie,
   AlertCircle,
   RefreshCw,
-  Upload,
-  ArrowRight
+  CloudCheck
 } from 'lucide-react';
-import { format, addDays, subDays, startOfWeek, endOfWeek, isSameDay, parseISO } from 'date-fns';
+import { 
+  format, 
+  addDays, 
+  subDays, 
+  startOfWeek, 
+  endOfWeek, 
+  isSameDay, 
+  parseISO 
+} from 'date-fns';
 
 export const MealPlans = () => {
   const [members, setMembers] = useState([]);
@@ -40,10 +53,12 @@ export const MealPlans = () => {
   const [saving, setSaving] = useState(false);
   const [savedStatus, setSavedStatus] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
-  // Load members on mount
+  // Modals
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+
+  // 1. Initial Load of Members
   const loadInitialMembers = async () => {
     try {
       setLoadingMembers(true);
@@ -54,7 +69,7 @@ export const MealPlans = () => {
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage('Failed to load members.');
+      setErrorMessage('Failed to load family members: ' + err.message);
     } finally {
       setLoadingMembers(false);
     }
@@ -64,14 +79,14 @@ export const MealPlans = () => {
     loadInitialMembers();
   }, []);
 
-  const fetchPlanAndWeek = async () => {
+  // 2. Load Active Meal Plan & Weekly Strip
+  const fetchPlanAndWeek = useCallback(async () => {
     if (!selectedMemberId) return;
     try {
       setLoadingPlan(true);
       setErrorMessage('');
-      setSavedStatus(false);
 
-      // Fetch selected day's plan
+      // Fetch active day's plan
       const plan = await getMealPlan(selectedMemberId, selectedDate);
       if (plan) {
         setMeals({
@@ -89,7 +104,7 @@ export const MealPlans = () => {
         });
       }
 
-      // Fetch current week overview
+      // Fetch 7-day range for weekly overview
       const currentDateObj = parseISO(selectedDate);
       const start = format(startOfWeek(currentDateObj, { weekStartsOn: 1 }), 'yyyy-MM-dd');
       const end = format(endOfWeek(currentDateObj, { weekStartsOn: 1 }), 'yyyy-MM-dd');
@@ -98,21 +113,17 @@ export const MealPlans = () => {
 
     } catch (err) {
       console.error(err);
-      setErrorMessage('Failed to load meal plan.');
+      setErrorMessage('Could not load plan: ' + err.message);
     } finally {
       setLoadingPlan(false);
     }
-  };
-
-  // Fetch meal plan & weekly strip when selectedMember or selectedDate changes
-  useEffect(() => {
-    fetchPlanAndWeek();
   }, [selectedMemberId, selectedDate]);
 
-  const handleDateChange = (newDateStr) => {
-    setSelectedDate(newDateStr);
-  };
+  useEffect(() => {
+    fetchPlanAndWeek();
+  }, [fetchPlanAndWeek]);
 
+  // Date Navigation handlers
   const handlePrevDay = () => {
     const prev = subDays(parseISO(selectedDate), 1);
     setSelectedDate(format(prev, 'yyyy-MM-dd'));
@@ -127,8 +138,19 @@ export const MealPlans = () => {
     setSelectedDate(format(new Date(), 'yyyy-MM-dd'));
   };
 
-  const handleSave = async () => {
+  // Form input changes
+  const handleMealChange = (type, value) => {
+    setMeals(prev => ({
+      ...prev,
+      [type]: value
+    }));
+  };
+
+  // Save Meal Plan
+  const handleSavePlan = async (e) => {
+    if (e) e.preventDefault();
     if (!selectedMemberId) return;
+
     try {
       setSaving(true);
       setErrorMessage('');
@@ -200,31 +222,6 @@ export const MealPlans = () => {
     );
   }
 
-  if (members.length === 0) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-16 text-center">
-        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4">
-            <Users className="w-7 h-7" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">No Family Members Found</h2>
-          <p className="text-slate-500 text-sm mt-2">
-            Before creating meal plans, please add at least one family member.
-          </p>
-          <div className="mt-6">
-            <button
-              onClick={() => setIsBulkModalOpen(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium text-sm transition-all shadow-sm"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Bulk Upload via Excel / PDF</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const mealSections = [
     {
       id: 'breakfast',
@@ -265,11 +262,12 @@ export const MealPlans = () => {
       lightBg: 'bg-purple-50/50',
       borderFocus: 'focus:ring-purple-500',
       placeholder: 'e.g. Greek yogurt, walnuts, seasonal fruits',
-    },
+    }
   ];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      
       {/* Top Header: Member Selection & Controls */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         {/* Member Selector Tabs */}
@@ -303,20 +301,19 @@ export const MealPlans = () => {
         </div>
 
         {/* Date Navigation & Bulk Upload */}
-        <div className="flex items-center flex-wrap gap-2">
+        <div className="flex items-center flex-wrap gap-3">
           <button
             onClick={() => setIsBulkModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5"
-            title="Bulk Upload Excel / CSV / PDF"
+            className="px-4 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all shadow-2xs flex items-center gap-1.5"
           >
-            <Upload className="w-3.5 h-3.5" />
+            <Upload className="w-4 h-4" />
             <span>Upload Excel / PDF</span>
           </button>
 
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          <div className="flex items-center bg-slate-50 rounded-2xl p-1 border border-slate-200">
             <button
               onClick={handlePrevDay}
-              className="p-1.5 rounded-lg text-slate-600 hover:bg-white hover:shadow-xs transition-all font-bold"
+              className="p-2 hover:bg-white rounded-xl text-slate-600 transition-colors"
               title="Previous Day"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -324,21 +321,23 @@ export const MealPlans = () => {
 
             <button
               onClick={handleToday}
-              className="px-2.5 py-1 rounded-lg text-slate-700 hover:bg-white hover:shadow-xs text-xs font-bold transition-all uppercase tracking-wider"
+              className="px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white rounded-xl transition-colors uppercase tracking-wider"
             >
               Today
             </button>
 
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => handleDateChange(e.target.value)}
-              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <div className="relative flex items-center">
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-800 px-2 py-1 focus:outline-none cursor-pointer"
+              />
+            </div>
 
             <button
               onClick={handleNextDay}
-              className="p-1.5 rounded-lg text-slate-600 hover:bg-white hover:shadow-xs transition-all font-bold"
+              className="p-2 hover:bg-white rounded-xl text-slate-600 transition-colors"
               title="Next Day"
             >
               <ChevronRight className="w-4 h-4" />
@@ -347,46 +346,43 @@ export const MealPlans = () => {
         </div>
       </div>
 
-      {/* 7-Day Weekly Strip */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
-        <div className="flex items-center justify-between mb-3 px-1">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+      {/* Weekly Date Strip */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-xs">
+        <div className="flex items-center justify-between mb-3 text-xs text-slate-500 font-medium">
+          <span className="flex items-center gap-1.5">
             <CalendarIcon className="w-3.5 h-3.5 text-emerald-600" />
-            Weekly Overview for {currentMember?.name}
+            Weekly Overview for {currentMember?.name || 'Member'}
           </span>
-          <span className="text-xs text-slate-400">
-            {format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}
+          <span>
+            {format(weekDays[0], 'MMM d')} – {format(weekDays[6], 'MMM d, yyyy')}
           </span>
         </div>
 
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-3">
+        <div className="grid grid-cols-7 gap-2 sm:gap-3">
           {weekDays.map((day) => {
             const dateStr = format(day, 'yyyy-MM-dd');
-            const isSelected = dateStr === selectedDate;
+            const isSelected = selectedDate === dateStr;
             const isTodayDate = isSameDay(day, new Date());
-            const dayPlan = weekOverview[dateStr];
-            const hasMeals = dayPlan && (dayPlan.breakfast || dayPlan.lunch || dayPlan.dinner || dayPlan.snacks);
+            const hasPlan = Boolean(weekOverview[dateStr]?.breakfast || weekOverview[dateStr]?.lunch || weekOverview[dateStr]?.dinner);
 
             return (
               <button
                 key={dateStr}
-                onClick={() => handleDateChange(dateStr)}
-                className={`py-3 px-1 sm:px-2 rounded-xl text-center transition-all flex flex-col items-center justify-between border ${
+                onClick={() => setSelectedDate(dateStr)}
+                className={`py-3 px-2 rounded-2xl flex flex-col items-center justify-center transition-all border ${
                   isSelected
-                    ? 'border-emerald-600 bg-emerald-50/80 text-emerald-900 ring-2 ring-emerald-500/20 font-bold shadow-xs'
-                    : isTodayDate
-                    ? 'border-slate-300 bg-slate-50 text-slate-900 font-semibold'
-                    : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50/60 text-slate-600'
-                }`}
+                    ? 'bg-emerald-50/80 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/20 shadow-xs'
+                    : 'bg-slate-50/50 border-slate-100 text-slate-600 hover:bg-slate-100/60'
+                } ${isTodayDate && !isSelected ? 'border-amber-300 bg-amber-50/30' : ''}`}
               >
-                <span className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                   {format(day, 'EEE')}
                 </span>
-                <span className={`text-sm sm:text-base my-0.5 ${isSelected ? 'text-emerald-700 font-extrabold' : ''}`}>
+                <span className={`text-base sm:text-lg font-bold my-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>
                   {format(day, 'd')}
                 </span>
-                <div className="h-1.5 w-full flex justify-center items-center gap-0.5 mt-1">
-                  {hasMeals ? (
+                <div className="h-1.5 flex items-center justify-center mt-1">
+                  {hasPlan ? (
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                   ) : (
                     <span className="w-1 h-1 rounded-full bg-slate-200"></span>
@@ -398,102 +394,114 @@ export const MealPlans = () => {
         </div>
       </div>
 
-      {/* Main Meal Editor */}
-      <div className="space-y-4">
-        {/* Banner with date title and duplicate action */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-5 rounded-3xl shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      {/* Main Meal Editor Form */}
+      <form onSubmit={handleSavePlan} className="space-y-6">
+        {/* Banner with Actions */}
+        <div className="bg-emerald-800 text-white rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <span className="text-emerald-100 text-xs font-semibold uppercase tracking-wider">
+            <div className="text-xs uppercase tracking-wider font-semibold text-emerald-200">
               {currentMember?.name}'s Meal Plan
-            </span>
+            </div>
             <h2 className="text-xl sm:text-2xl font-bold mt-0.5">
               {format(parseISO(selectedDate), 'EEEE, MMMM d, yyyy')}
             </h2>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => setIsDuplicateModalOpen(true)}
-              className="px-4 py-2 bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center gap-1.5 border border-white/20"
-              title="Duplicate to other dates"
+              className="px-4 py-2 rounded-xl bg-emerald-700/80 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-2 transition-colors border border-emerald-600/60 shadow-xs"
             >
-              <Copy className="w-4 h-4" />
+              <Copy className="w-3.5 h-3.5" />
               <span>Duplicate Plan</span>
             </button>
+
             <button
-              onClick={handleSave}
+              type="submit"
               disabled={saving}
-              className="px-5 py-2 bg-white text-emerald-800 hover:bg-emerald-50 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+              className={`px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${
+                savedStatus
+                  ? 'bg-emerald-400 text-emerald-950 ring-2 ring-emerald-300'
+                  : 'bg-white text-emerald-900 hover:bg-emerald-50'
+              }`}
             >
               {saving ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving...</span>
+                </>
               ) : savedStatus ? (
-                <Check className="w-4 h-4 text-emerald-600 font-extrabold" />
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Saved to Cloud!</span>
+                </>
               ) : (
-                <Save className="w-4 h-4" />
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Plan</span>
+                </>
               )}
-              <span>{saving ? 'Saving...' : savedStatus ? 'Saved!' : 'Save Plan'}</span>
             </button>
           </div>
         </div>
 
+        {/* Error Alert */}
         {errorMessage && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-sm flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-500" />
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
             <span>{errorMessage}</span>
           </div>
         )}
 
-        {/* 4 Meals Grid */}
+        {/* 4 Meal Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {mealSections.map((section) => {
             const Icon = section.icon;
-            const mealValue = meals[section.id];
+            const value = meals[section.id] || '';
 
             return (
               <div
                 key={section.id}
-                className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
+                className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs space-y-3 transition-shadow hover:shadow-sm"
               >
-                <div>
-                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`p-2 rounded-xl text-white ${section.accentBg} shadow-xs`}>
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-800 text-base">{section.title}</h3>
-                        <span className="text-[11px] text-slate-400 font-medium">Daily meal item</span>
-                      </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-2xl ${section.accentBg} text-white flex items-center justify-center shadow-xs`}>
+                      <Icon className="w-5 h-5" />
                     </div>
-
-                    {mealValue && (
-                      <button
-                        type="button"
-                        onClick={() => setMeals({ ...meals, [section.id]: '' })}
-                        className="text-xs text-slate-400 hover:text-rose-500 font-medium transition-colors"
-                      >
-                        Clear
-                      </button>
-                    )}
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm">{section.title}</h3>
+                      <p className="text-[10px] text-slate-400">Daily meal item</p>
+                    </div>
                   </div>
 
-                  <div className="relative">
-                    <textarea
-                      rows={3}
-                      value={mealValue}
-                      onChange={(e) => setMeals({ ...meals, [section.id]: e.target.value })}
-                      placeholder={section.placeholder}
-                      className={`w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 ${section.borderFocus} focus:border-transparent transition-all resize-none`}
-                    />
-                  </div>
+                  {value && (
+                    <button
+                      type="button"
+                      onClick={() => handleMealChange(section.id, '')}
+                      className="text-[10px] text-slate-400 hover:text-rose-600 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
 
-                <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-                  <span>{mealValue.trim().length > 0 ? `${mealValue.trim().length} chars` : 'Empty'}</span>
-                  {mealValue.trim().length > 0 && (
+                <div className="relative">
+                  <textarea
+                    rows={3}
+                    value={value}
+                    onChange={(e) => handleMealChange(section.id, e.target.value)}
+                    placeholder={section.placeholder}
+                    className={`w-full p-3.5 bg-slate-50/70 border border-slate-200 rounded-2xl text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 ${section.borderFocus} transition-all leading-relaxed`}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+                  <span>{value ? `${value.length} characters` : 'Empty'}</span>
+                  {value && (
                     <span className="text-emerald-600 font-medium flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Ready for Telegram
+                      <Check className="w-3 h-3" /> Ready
                     </span>
                   )}
                 </div>
@@ -501,41 +509,26 @@ export const MealPlans = () => {
             );
           })}
         </div>
+      </form>
 
-        {/* Bottom floating save bar on mobile */}
-        <div className="pt-4 flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full sm:w-auto px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 text-base"
-          >
-            {saving ? (
-              <RefreshCw className="w-5 h-5 animate-spin" />
-            ) : savedStatus ? (
-              <Check className="w-5 h-5" />
-            ) : (
-              <Save className="w-5 h-5" />
-            )}
-            <span>{saving ? 'Saving...' : savedStatus ? 'Saved Successfully!' : 'Save Meal Plan'}</span>
-          </button>
-        </div>
-      </div>
-
-      <DuplicateModal
-        isOpen={isDuplicateModalOpen}
-        onClose={() => setIsDuplicateModalOpen(false)}
-        onDuplicate={handleDuplicate}
-        sourceDate={selectedDate}
-        memberName={currentMember?.name || 'Member'}
-        currentPlan={meals}
-      />
-
+      {/* Bulk Upload Modal */}
       <BulkUploadModal
         isOpen={isBulkModalOpen}
         onClose={() => setIsBulkModalOpen(false)}
         members={members}
         onImportSuccess={handleBulkImportSuccess}
       />
+
+      {/* Duplicate Plan Modal */}
+      <DuplicateModal
+        isOpen={isDuplicateModalOpen}
+        onClose={() => setIsDuplicateModalOpen(false)}
+        sourceDate={selectedDate}
+        memberName={currentMember?.name || 'Member'}
+        currentPlan={meals}
+        onDuplicate={handleDuplicate}
+      />
+
     </div>
   );
 };
