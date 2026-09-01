@@ -1,6 +1,5 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const SERVICE_ACCOUNT_RAW = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -67,26 +66,53 @@ async function downloadTelegramFile(fileId) {
   return Buffer.from(arrayBuffer).toString('base64');
 }
 
-// Helper to call Gemini with automatic model fallback
-async function generateWithGeminiFallback(genAI, contentParts) {
-  const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-1.5-pro-latest'];
+// Call Google Gemini REST API directly with automatic model discovery
+async function callGeminiRest(apiKey, contents, systemPrompt = '') {
+  // Candidate endpoints in order of capability
+  const candidateModels = [
+    'gemini-2.0-flash-exp',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+    'gemini-1.5-pro',
+    'gemini-pro'
+  ];
+
   let lastError = null;
 
-  for (const modelName of candidateModels) {
+  for (const model of candidateModels) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(contentParts);
-      return result.response.text();
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: contents
+      };
+      if (systemPrompt) {
+        payload.systemInstruction = {
+          parts: [{ text: systemPrompt }]
+        };
+      }
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+        return data.candidates[0].content.parts[0].text;
+      }
+      if (data.error) {
+        lastError = new Error(`[${model}] ${data.error.message}`);
+      }
     } catch (err) {
       lastError = err;
-      console.warn(`Model ${modelName} failed, trying next model:`, err.message);
     }
   }
 
-  throw lastError || new Error('All Gemini model candidates failed');
+  throw lastError || new Error('Gemini API call failed');
 }
 
-// Fallback Natural Language Parser
+// Fallback Natural Language Parser (Regex & Keyword Matcher)
 function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAndMember) {
   const clean = promptText.toLowerCase();
 
@@ -207,11 +233,34 @@ export default async function handler(req, res) {
       }
     }
 
+    // Build context string of all meals
+    let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
+    members.forEach(m => {
+      mealsContext += `- ${m.name} (Age: ${m.age || 'N/A'}, Relation: ${m.relation || 'Family'}, Diet: ${m.diet || 'Veg'})\n`;
+    });
+    mealsContext += `\nPlanned Meals Database:\n`;
+    for (let i = 0; i < 4; i++) {
+      const dStr = getTodayString(TIMEZONE, i);
+      mealsContext += `\nDate: ${dStr} (${getFriendlyDate(dStr, TIMEZONE)}):\n`;
+      members.forEach(m => {
+        const p = plansByDateAndMember.get(`${dStr}_${m.id}`);
+        mealsContext += `  ${m.name}: Breakfast=${p?.breakfast || 'Not set'}, Lunch=${p?.lunch || 'Not set'}, Dinner=${p?.dinner || 'Not set'}, Snacks=${p?.snacks || 'Not set'}\n`;
+      });
+    }
+
+    const systemPrompt = `You are MealBot, the friendly personal family meal voice assistant for Mandar's family on their iPad.
+Family members: MANDAR (31, Non-Veg), MADHURA (33, Non-Veg), PANKAJ (33, Non-Veg), VRUSHALI (60, Veg), AGASTYA (3, Non-Veg Toddler).
+Answer accurately based on the meal database.
+Use clean HTML formatting (<b>bold</b>, <i>italic</i>, emojis: 🌅 Breakfast, 🍛 Lunch, 🌙 Dinner, 🍪 Snacks).
+
+Database Context:
+${mealsContext}`;
+
     // --- 1. HANDLE VOICE MESSAGE (Voice notes on Telegram) ---
     if (isVoice) {
       if (!GEMINI_API_KEY) {
         const voiceMissingKeyNotice = `🎙️ <b>Voice Message Received!</b>\n\n` +
-          `To enable AI voice processing, please add <code>GEMINI_API_KEY</code> to your Vercel Environment Variables.`;
+          `To enable AI voice processing, please add <code>GEMINI_API_KEY</code> in Vercel Environment Variables.`;
         await sendTelegramReply(chatId, voiceMissingKeyNotice);
         return res.status(200).json({ ok: true });
       }
@@ -219,75 +268,38 @@ export default async function handler(req, res) {
       const voiceFileId = (msg.voice || msg.audio).file_id;
       const base64Audio = await downloadTelegramFile(voiceFileId);
 
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-
-      let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
-      members.forEach(m => {
-        mealsContext += `- ${m.name} (Age: ${m.age || 'N/A'}, Relation: ${m.relation || 'Family'}, Diet: ${m.diet || 'Veg'})\n`;
-      });
-      mealsContext += `\nUpcoming Planned Meals Database:\n`;
-      for (let i = 0; i < 4; i++) {
-        const dStr = getTodayString(TIMEZONE, i);
-        mealsContext += `\nDate: ${dStr} (${getFriendlyDate(dStr, TIMEZONE)}):\n`;
-        members.forEach(m => {
-          const p = plansByDateAndMember.get(`${dStr}_${m.id}`);
-          mealsContext += `  ${m.name}: Breakfast=${p?.breakfast || 'Not set'}, Lunch=${p?.lunch || 'Not set'}, Dinner=${p?.dinner || 'Not set'}, Snacks=${p?.snacks || 'Not set'}\n`;
-        });
-      }
-
-      const prompt = `You are MealBot, the personal family meal voice assistant for Mandar's family (Mandar, Madhura, Pankaj, Vrushali, Agastya).
-Listen to the user's voice question carefully and answer their question based STRICTLY on the meals database below.
-Format your answer with appropriate emojis (🌅 Breakfast, 🍛 Lunch, 🌙 Dinner, 🍪 Snacks) and keep it friendly, helpful, and concise.
-
-Database Context:
-${mealsContext}`;
-
-      const aiResponse = await generateWithGeminiFallback(genAI, [
-        prompt,
+      const contents = [
         {
-          inlineData: {
-            mimeType: msg.voice?.mime_type || 'audio/ogg',
-            data: base64Audio
-          }
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: msg.voice?.mime_type || 'audio/ogg',
+                data: base64Audio
+              }
+            },
+            {
+              text: 'Please listen to this voice message and answer the user question based on the family meal database.'
+            }
+          ]
         }
-      ]);
+      ];
 
+      const aiResponse = await callGeminiRest(GEMINI_API_KEY, contents, systemPrompt);
       await sendTelegramReply(chatId, aiResponse);
       return res.status(200).json({ ok: true });
     }
 
     // --- 2. HANDLE NATURAL LANGUAGE TEXT VIA GEMINI ---
     if (GEMINI_API_KEY && userText && !userText.startsWith('/start') && !userText.startsWith('/help')) {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+      const contents = [
+        {
+          role: 'user',
+          parts: [{ text: `User Question: "${userText}"` }]
+        }
+      ];
 
-      let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
-      members.forEach(m => {
-        mealsContext += `- ${m.name} (Age: ${m.age || 'N/A'}, Relation: ${m.relation || 'Family'}, Diet: ${m.diet || 'Veg'})\n`;
-      });
-      mealsContext += `\nPlanned Meals Database:\n`;
-      for (let i = 0; i < 4; i++) {
-        const dStr = getTodayString(TIMEZONE, i);
-        mealsContext += `\nDate: ${dStr} (${getFriendlyDate(dStr, TIMEZONE)}):\n`;
-        members.forEach(m => {
-          const p = plansByDateAndMember.get(`${dStr}_${m.id}`);
-          mealsContext += `  ${m.name}: Breakfast=${p?.breakfast || 'Not set'}, Lunch=${p?.lunch || 'Not set'}, Dinner=${p?.dinner || 'Not set'}, Snacks=${p?.snacks || 'Not set'}\n`;
-        });
-      }
-
-      const systemPrompt = `You are MealBot, the personal family meal assistant for Mandar's family on their iPad.
-Family members: MANDAR (31, Non-Veg), MADHURA (33, Non-Veg), PANKAJ (33, Non-Veg), VRUSHALI (60, Veg), AGASTYA (3, Non-Veg Toddler).
-Answer the user's natural language question accurately based on the meal database provided.
-Support Hindi, Marathi, Hinglish, and English questions.
-Use clean HTML formatting (<b>bold</b>, <i>italic</i>, emojis).
-
-Database:
-${mealsContext}`;
-
-      const aiResponse = await generateWithGeminiFallback(genAI, [
-        { text: systemPrompt },
-        { text: `User Question: "${userText}"` }
-      ]);
-
+      const aiResponse = await callGeminiRest(GEMINI_API_KEY, contents, systemPrompt);
       await sendTelegramReply(chatId, aiResponse);
       return res.status(200).json({ ok: true });
     }
