@@ -8,10 +8,15 @@ const TIMEZONE = process.env.TIMEZONE || 'Asia/Kolkata';
 function getDb() {
   if (getApps().length === 0) {
     if (!SERVICE_ACCOUNT_RAW) {
-      throw new Error('Missing FIREBASE_SERVICE_ACCOUNT');
+      return null;
     }
-    const cred = typeof SERVICE_ACCOUNT_RAW === 'string' ? JSON.parse(SERVICE_ACCOUNT_RAW) : SERVICE_ACCOUNT_RAW;
-    initializeApp({ credential: cert(cred) });
+    try {
+      const cred = typeof SERVICE_ACCOUNT_RAW === 'string' ? JSON.parse(SERVICE_ACCOUNT_RAW) : SERVICE_ACCOUNT_RAW;
+      initializeApp({ credential: cert(cred) });
+    } catch (e) {
+      console.error('Failed to parse service account:', e);
+      return null;
+    }
   }
   return getFirestore();
 }
@@ -29,6 +34,7 @@ function getFriendlyDate(dateStr, tz) {
 }
 
 async function sendTelegramReply(chatId, text) {
+  if (!BOT_TOKEN) return;
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   await fetch(url, {
     method: 'POST',
@@ -43,8 +49,9 @@ async function sendTelegramReply(chatId, text) {
 }
 
 export default async function handler(req, res) {
+  // GET health check
   if (req.method !== 'POST') {
-    return res.status(200).send('MealBot Telegram Webhook Running!');
+    return res.status(200).send('MealBot Telegram Webhook is Online and Ready! 🚀');
   }
 
   const update = req.body;
@@ -63,6 +70,31 @@ export default async function handler(req, res) {
     const todayStr = getTodayString(TIMEZONE, 0);
     const tomorrowStr = getTodayString(TIMEZONE, 1);
 
+    // 1. HELP / START COMMAND
+    if (text === '/start' || text === '/help' || text === 'help' || text === 'hi' || text === 'hey') {
+      const helpMsg = `🍽️ <b>Welcome to MealBot!</b>\n\n` +
+        `Ask me anytime about meals on your iPad:\n\n` +
+        `• <b>/today</b> — Today's meals for all 5 members\n` +
+        `• <b>/tomorrow</b> — Tomorrow's meal plan\n` +
+        `• <b>/breakfast</b> — Breakfast today\n` +
+        `• <b>/lunch</b> — Lunch today\n` +
+        `• <b>/dinner</b> — Dinner tonight\n` +
+        `• <b>/snacks</b> — Snacks today\n\n` +
+        `<b>Check specific member:</b>\n` +
+        `• <b>/mandar</b>\n` +
+        `• <b>/madhura</b>\n` +
+        `• <b>/pankaj</b>\n` +
+        `• <b>/vrushali</b>\n` +
+        `• <b>/agastya</b>\n`;
+      await sendTelegramReply(chatId, helpMsg);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (!db) {
+      await sendTelegramReply(chatId, '⚠️ Firebase database is connecting. Please ensure FIREBASE_SERVICE_ACCOUNT is set in Vercel Environment Variables.');
+      return res.status(200).json({ ok: true });
+    }
+
     // Fetch members
     const membersSnap = await db.collection('members').get();
     let members = membersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -74,23 +106,6 @@ export default async function handler(req, res) {
         { id: 'member-vrushali', name: 'VRUSHALI (60)' },
         { id: 'member-agastya', name: 'AGASTYA (3)' }
       ];
-    }
-
-    // 1. HELP / START
-    if (text === '/start' || text === '/help' || text === 'help') {
-      const helpMsg = `🍽️ <b>Welcome to MealBot Query!</b>\n\n` +
-        `You can ask me anytime on your iPad:\n\n` +
-        `• <b>/today</b> — All meals planned for today\n` +
-        `• <b>/tomorrow</b> — Tomorrow's meal plan\n` +
-        `• <b>/breakfast</b> — Today's breakfast for everyone\n` +
-        `• <b>/lunch</b> — Today's lunch for everyone\n` +
-        `• <b>/dinner</b> — Today's dinner for everyone\n` +
-        `• <b>/snacks</b> — Today's snacks\n` +
-        `• <b>/grocery</b> — Coming week grocery checklist\n\n` +
-        `<b>Check specific member:</b>\n` +
-        `• <b>/mandar</b> | <b>/madhura</b> | <b>/pankaj</b> | <b>/vrushali</b> | <b>/agastya</b>\n`;
-      await sendTelegramReply(chatId, helpMsg);
-      return res.status(200).json({ ok: true });
     }
 
     // 2. SPECIFIC MEMBER QUERY (/mandar, /madhura, /pankaj, /vrushali, /agastya)
@@ -153,7 +168,7 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error('Webhook error:', err);
-    await sendTelegramReply(chatId, `⚠️ Could not fetch meals: ${err.message}`);
+    await sendTelegramReply(chatId, `⚠️ Error processing request: ${err.message}`);
     return res.status(200).json({ ok: true });
   }
 }
