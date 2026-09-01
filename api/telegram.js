@@ -67,6 +67,25 @@ async function downloadTelegramFile(fileId) {
   return Buffer.from(arrayBuffer).toString('base64');
 }
 
+// Helper to call Gemini with automatic model fallback
+async function generateWithGeminiFallback(genAI, contentParts) {
+  const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-1.5-pro-latest'];
+  let lastError = null;
+
+  for (const modelName of candidateModels) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(contentParts);
+      return result.response.text();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Model ${modelName} failed, trying next model:`, err.message);
+    }
+  }
+
+  throw lastError || new Error('All Gemini model candidates failed');
+}
+
 // Fallback Natural Language Parser
 function ruleBasedNLP(promptText, todayStr, tomorrowStr, members, plansByDateAndMember) {
   const clean = promptText.toLowerCase();
@@ -192,11 +211,7 @@ export default async function handler(req, res) {
     if (isVoice) {
       if (!GEMINI_API_KEY) {
         const voiceMissingKeyNotice = `🎙️ <b>Voice Message Received!</b>\n\n` +
-          `To enable AI voice processing:\n` +
-          `1. Get a free API key at <b>aistudio.google.com</b>\n` +
-          `2. Add <code>GEMINI_API_KEY</code> to your Vercel Environment Variables\n` +
-          `3. Redeploy Vercel.\n\n` +
-          `<i>In the meantime, you can type your questions naturally!</i>`;
+          `To enable AI voice processing, please add <code>GEMINI_API_KEY</code> to your Vercel Environment Variables.`;
         await sendTelegramReply(chatId, voiceMissingKeyNotice);
         return res.status(200).json({ ok: true });
       }
@@ -205,7 +220,6 @@ export default async function handler(req, res) {
       const base64Audio = await downloadTelegramFile(voiceFileId);
 
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
       members.forEach(m => {
@@ -228,7 +242,7 @@ Format your answer with appropriate emojis (🌅 Breakfast, 🍛 Lunch, 🌙 Din
 Database Context:
 ${mealsContext}`;
 
-      const result = await model.generateContent([
+      const aiResponse = await generateWithGeminiFallback(genAI, [
         prompt,
         {
           inlineData: {
@@ -238,7 +252,6 @@ ${mealsContext}`;
         }
       ]);
 
-      const aiResponse = result.response.text();
       await sendTelegramReply(chatId, aiResponse);
       return res.status(200).json({ ok: true });
     }
@@ -246,7 +259,6 @@ ${mealsContext}`;
     // --- 2. HANDLE NATURAL LANGUAGE TEXT VIA GEMINI ---
     if (GEMINI_API_KEY && userText && !userText.startsWith('/start') && !userText.startsWith('/help')) {
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       let mealsContext = `Today is ${getFriendlyDate(todayStr, TIMEZONE)} (${todayStr}).\nFamily Profiles:\n`;
       members.forEach(m => {
@@ -271,12 +283,11 @@ Use clean HTML formatting (<b>bold</b>, <i>italic</i>, emojis).
 Database:
 ${mealsContext}`;
 
-      const result = await model.generateContent([
+      const aiResponse = await generateWithGeminiFallback(genAI, [
         { text: systemPrompt },
         { text: `User Question: "${userText}"` }
       ]);
 
-      const aiResponse = result.response.text();
       await sendTelegramReply(chatId, aiResponse);
       return res.status(200).json({ ok: true });
     }
